@@ -37,6 +37,109 @@ suitable for AES-256.
 
 ---
 
+## 🧩 Architecture
+
+A thin binary plus a library, split so every hardware-free rule is testable.
+`FidoKeyHidDevice` is the only module that imports `ctap-hid-fido2`: `derive`
+and `enroll` depend on the `VaultDevice` trait, so the test suite runs them
+against a recording fake with no BioPass attached.
+
+| 📁 Module | Responsibility |
+|---|---|
+| `src/config.rs` | RP id, salt label, user handles, credential-name prefix |
+| `src/error.rs` | `VaultError` with user-facing messages + exit codes |
+| `src/cli.rs` | `Command` / `parse_args` — `enroll`, `derive`, `--pin`, `--help` |
+| `src/device.rs` | `VaultDevice` trait + `FidoKeyHidDevice` transport |
+| `src/crypto.rs` | `derive_vault_key`, `to_hex` (pure, doctested) |
+| `src/naming.rs` | `next_credential_name` — sequential `wrapperNN` labels |
+| `src/derive.rs` | key derivation flow |
+| `src/enroll.rs` | enrolment flow (R/A, replace, rename) |
+| `src/main.rs` | argument handling and presentation only |
+
+The full data-flow diagrams and the credential-management command surface live in
+[`docs/architecture.md`](docs/architecture.md).
+
+```mermaid
+flowchart LR
+    subgraph bin["src/main.rs (thin CLI)"]
+        A["parse_args -> Command"]
+    end
+    subgraph lib["src/lib.rs (library)"]
+        B["cli"]:::m
+        C["derive / enroll"]:::m
+        D["crypto / naming"]:::m
+        E["device:VaultDevice"]:::m
+        F["FidoKeyHidDevice"]:::m
+    end
+    subgraph hw["USB authenticator"]
+        G["Feitian BioPass"]
+    end
+    A --> B --> C --> D
+    C --> E --> F --> G
+    classDef m fill:#242a32,stroke:#334155,color:#e2e8f0,stroke-width:1px;
+```
+
+### 📁 Project tree
+
+`./target` and `.git` are excluded for clarity.
+
+```text
+kevops-feitian-ufa-wrapper/
+├── Cargo.lock
+├── Cargo.toml
+├── Makefile              # quality gates + dev shortcuts (make ci / help)
+├── README.md
+├── .taplo.toml           # taplo format/lint config
+├── docs/
+│   └── architecture.md   # data-flow diagrams and the VaultDevice contract
+├── src/
+│   ├── lib.rs            # #![forbid(unsafe_code)], module map
+│   ├── main.rs           # parse -> wire device -> render  (thin CLI front-end)
+│   ├── cli.rs            # Command / parse_args
+│   ├── config.rs         # RP_ID, salt label, identity, name prefix
+│   ├── crypto.rs         # derive_vault_key, to_hex   (pure, doctests)
+│   ├── naming.rs         # wrapper01/wrapper02 sequence
+│   ├── device.rs         # VaultDevice trait + FidoKeyHidDevice (USB)
+│   ├── derive.rs         # key derivation flow
+│   └── enroll.rs         # enrolment flow (R/A, replace, rename, delete)
+└── tests/
+    ├── common/mod.rs     # FakeDevice: records calls in order
+    ├── cli_contract.rs
+    ├── derive_flow.rs
+    └── enroll_flow.rs
+```
+
+> `.github/workflows/ci.yml` is **not** committed yet — it is shown as a
+> starting point in "CI pipeline" to mirror `make ci`.
+
+### 📈 Key-derivation data flow
+
+```text
+user: cargo run --release [--pin <pin>]
+
+ parse_args ──► Command::Derive { pin }
+        │
+        ▼ open_device()                                   (USB HID / ctap-hid-fido2)
+        │ FidoKeyHidDevice                                  0x096e:085d / 0x0866
+        ▼
+ eprintln("⚡ tap the sensor ...")            ──► stderr
+        │
+        ▼ derive_vault_key(device, SALT_LABEL, pin)
+        │   device.hmac_secret(salt, pin)      uv=true (fingerprint),
+        │                                       or pinUvAuth when --pin is given
+        ▼
+ crypto::derive_vault_key -> [u8; 32]         SHA-256(hmac_secret) -> AES-256 key
+        │ eprintln("🔓 Fingerprint verified ...") ──► stderr
+        ▼
+ print!("{:x}", key)                                ──► stdout: 64 hex chars ONLY
+```
+
+`stdout` is the key channel and **nothing else** is ever written to it — every
+user-facing message goes to `stderr`, so `Command::output()` / piping yields a
+clean, trimmable token.
+
+---
+
 ## ✅ Prerequisites
 
 | 📦 Requirement | Notes |
@@ -77,18 +180,27 @@ cd kevops-feitian-ufa-wrapper
 cargo check            # 🧪 fast feedback
 cargo build --release  # 📦 optimized artifact
 
-cargo run --release    # 👆 prompts for the fingerprint
+cargo run --release                          # 👆 prompts for the fingerprint
+cargo run --release -- enroll --pin 123456   # 🪪 one-time enrol (needs the device PIN)
+
+make ci        # 🧰 full offline gate: fmt + toml-lint + clippy + test + doc
 ```
 
-Expected output:
+Expected output — the 64-char key on **stdout**, every human message on **stderr**:
 
-```
-⚡ Please tap the Feitian BioPass fingerprint sensor...
-🔓 Fingerprint verified! 256-bit Vault key derived: <64 hex chars>
+```console
+$ cargo run --release 2>/dev/null
+4f1c...c07d                      # ← stdout only: 64 hex chars, safe to pipe
+$ cargo run --release
+⚡ Please tap the Feitian BioPass fingerprint sensor...   # stderr
+🔓 Fingerprint verified! 256-bit Vault key derived.       # stderr
 ```
 
 > ⚠️ **Keep `Cargo.lock` committed** — this is a binary crate, so the lockfile is what makes builds
 > reproducible across dev, CI, and release.
+>
+> 🔐 **stdout is a key channel, not a console.** Never add a `println!` to the derive path — the test
+> suite asserts stdout stays empty unless the derived key is written.
 
 ---
 
@@ -98,32 +210,48 @@ Expected output:
 
 | | Principle | How this repo honours it |
 |---|---|---|
-| 🔁 | **Automate everything** | Every step is a single `cargo` command; no manual key handling or copy-paste steps |
+| 🔁 | **Automate everything** | Every step is a single `make` target; no manual key handling or copy-paste steps |
 | 🏗️ | **Everything as code** | Build, lint, and release config live in the repo, versioned with the source |
 | 📦 | **Immutable, reproducible artifacts** | `Cargo.lock` committed; `--release` builds are treated as immutable |
-| 🧪 | **Shift-left testing** | `cargo check` for fast feedback, `cargo clippy` and `cargo fmt --check` as gates |
+| 🧪 | **Shift-left testing** | 50 hardware-free tests in `make test`; `cargo fmt --check`, `taplo`, `clippy -D warnings` and `rustdoc` are all gates |
 | 🔒 | **Security by default / least privilege** | Runs unprivileged; scoped udev rule only for the Feitian VID/PID |
 | 🚫 | **Zero secrets at rest** | No vault key, PIN, or credential material is persisted anywhere on disk |
 | 🔗 | **Supply-chain integrity** | Pinned dependency versions, committed lockfile, `cargo audit` in CI |
-| 📊 | **Observability** | Structured CTAP/HID tracing via `Cfg::init()` + keep-alive user prompts |
+| 📊 | **Observability** | Structured CTAP/HID tracing via `Cfg` + keep-alive prompts routed to stderr |
 | 🧯 | **Fail fast, fail loud** | Explicit errors for missing device / missing hmac-secret output |
 | ♻️ | **Idempotent & stateless** | The binary holds no state; re-running yields the same key for the same device+salt |
 | 📝 | **Docs as code** | This README changes in the same PR as the behaviour it documents |
 
-### 🧪 Recommended quality gates
+### 🧪 Quality gates
+
+Everything is a single Makefile target, so local runs and CI cannot drift:
 
 ```bash
-cargo fmt --check   # 🎨 formatting is not a matter of taste
-cargo clippy --all-targets -- -D warnings   # 🧹 lint gate
-cargo test          # 🔬 unit + integration tests
-cargo audit         # 🔗 dependency vulnerability scan
-cargo build --release   # 📦 release artifact
+make ci            # 🎯 fmt-check + toml-lint + clippy -D warnings + test + doc
+make test          # 🔬 unit, functional and doc tests
+make fmt-check     # 🎨 cargo fmt --check + taplo fmt --check
+make lint-rust     # 🧹 cargo clippy --all-targets -- -D warnings
+make toml-lint     # 🧾 taplo lint (schema-aware TOML)
+make audit         # 🔗 cargo audit --deny warnings
+make doc           # 📚 rustdoc, warnings denied
+make run           # 👆 derive the key
+make enroll        # 🪪 enrol/replace the credential
+make help          # 📋 list all targets
 ```
 
-### 🔁 Recommended CI pipeline
+`taplo` and `cargo-audit` are optional: when they are not installed the target
+**skips with an install hint** (exit 0), and `make STRICT=1 ci` turns a missing
+tool into a hard failure — the form to use in CI.
+
+```bash
+sudo apt-get install -y pkg-config libudev-dev
+cargo install taplo-cli --locked cargo-audit --locked   # 🔒 unlocks the TOML + supply-chain gates
+```
+
+### 🔁 CI pipeline
 
 ```yaml
-# .github/workflows/ci.yml (suggested starting point)
+# .github/workflows/ci.yml — mirrors `make ci` exactly
 name: ci
 on: [push, pull_request]
 jobs:
@@ -131,18 +259,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with: { components: "rustfmt, clippy" }
       - run: sudo apt-get install -y pkg-config libudev-dev   # 🔧 hidapi
-      - run: cargo fmt --check                                # 🎨
-      - run: cargo clippy --all-targets -- -D warnings        # 🧹
-      - run: cargo build --release                            # 📦
+      - run: cargo install taplo-cli --locked                 # 🧾 TOML gate
+      - run: make STRICT=1 ci                                 # 🎯 cannot skip a gate
       - uses: rustsec/audit-check@v2                          # 🔗 supply chain
-        with: { token: "${{ secrets.GITHUB_TOKEN }}" }
+        with: { token: "${{ secrets.GITHUB_TOKEN }}" }}
 ```
 
 > 🤖 Hardware-in-the-loop (real BioPass) cannot run on hosted runners — keep the device-dependent
-> path behind a self-hosted runner or a manual smoke-test job.
+> path behind a self-hosted runner or a manual smoke-test job. The functional suite is
+> hardware-free by design, so CI still covers every decision the flows make.
 
 ### 🔖 Release & versioning
 
@@ -154,12 +280,33 @@ jobs:
 
 ---
 
+## 🧬 Testing
+
+50 tests, all hardware-free: `tests/common/mod.rs` provides `FakeDevice`, a
+`VaultDevice` that records calls **in order** (`Create`, `Rename`, `Delete`), so
+the suite can assert the safety properties of the flows rather than just their
+happy path:
+
+| ✅ Property under test | Assertion |
+|---|---|
+| Replace never strands the vault | `Create` → `Rename` → `Delete` — old credentials die **after** the new one is named |
+| A rename failure stops before any delete | no `Delete` is ever recorded |
+| Sequential naming | `01` → `02` → `03`, `07` → `08`, `99` → `100`, foreign names fall back to `01` |
+| Interactive R/A | `Ask` delegates to the policy; anything but `R` adds |
+| stdout is a pure key channel | 0 bytes on stdout when the device fails; prompts on stderr |
+| Key derivation | matches an independent SHA-256; deterministic; 64 hex chars |
+
+Only a short list is shown — run `make test` for the full set.
+
+---
+
 ## 🔐 Security Model
 
 | 🛡️ Control | Detail |
 |---|---|
 | 🔏 Key custody | `CredRandom` never leaves the secure element; only its HMAC output is returned |
 | 👆 User verification | `uv = Some(true)` forces the fingerprint — the key cannot be derived from a stale token |
+| 🔐 PIN (`uv = None`) | If the authenticator answers `CTAP2_ERR_PIN_REQUIRED` for the hmac-secret extension, pass `derive --pin <pin>`. This authenticates with `pinUvAuth`, which sets `uv = None`, **bypassing the fingerprint** — a deliberate trade-off, so prefer the hardware credential's built-in UV where the device allows it |
 | 🧂 Domain separation | A distinct 32-byte salt per vault database; changing the salt yields a different key |
 | 🚫 No persistence | Nothing is written to disk; the key goes to stdout for the caller to consume |
 | 🔑 No fallback secrets | There is no password or recovery file that bypasses the hardware |
@@ -173,9 +320,11 @@ jobs:
 ## 📊 Observability
 
 ```rust
+// Wired up once, in `src/device.rs::open_device()`
 let mut cfg = Cfg::init();
-cfg.enable_log = true;                // 🕵️ verbose CTAP/HID hex tracing
-cfg.keep_alive_msg_to_stderr = true;  // 📣 keep prompts off stdout
+cfg.enable_keep_alive_msg = true;       // 📣 keep the touch prompt
+cfg.keep_alive_msg_to_stderr = true;   // 📣 ...on stderr: stdout carries the key only
+cfg.enable_log = true;                 // 🕵️ verbose CTAP/HID hex tracing (debug only)
 ```
 
 - 🕵️ `enable_log` — full CTAP frame tracing while debugging device issues.
@@ -192,7 +341,9 @@ cfg.keep_alive_msg_to_stderr = true;  // 📣 keep prompts off stdout
 | `unresolved import fidokeyhid` / `no method get_hmac_secret` | 📦 Those APIs do not exist in `ctap-hid-fido2` 3.6.0 — use `GetAssertionArgsBuilder` + `AssertionExtension::HmacSecret` |
 | Salt rejected / panic on unwrap | 🧂 The salt must be exactly **32 bytes**; use `create_hmac_secret_from_string` |
 | `no assertion returned` | 🪪 No credential registered for the RP ID — enroll with `CredentialExtension::HmacSecret(Some(true))` first |
-| No hmac-secret output, finger accepted | 🔑 Many authenticators require a `pinUvAuthToken`; supply a PIN via `.pin(...)` (note: this sets `uv = None`) |
+| No hmac-secret output, finger accepted | 🔑 Many authenticators require a `pinUvAuthToken`; supply a PIN via `derive --pin <pin>` (note: this sets `uv = None`) |
+| `response_status err = 0x36 CTAP2_ERR_PIN_REQUIRED` | 🔐 This BioPass requires `pinUvAuth` for the hmac-secret extension: re-run with `--pin <pin>` (this is what `src/device.rs::hmac_secret` forwards) |
+| `user_tests` / build fails on `missing_docs` | 📝 Public API must be documented; add a `///` doc comment to the item (the README's "docs as code" gate) |
 | Permission denied opening hidraw | 🦶 Re-apply the udev rule and verify `groups` includes `plugdev` |
 | Fingerprint never triggers | 👆 Ensure a fingerprint is enrolled and the device is not in U2F-only mode |
 
@@ -200,12 +351,14 @@ cfg.keep_alive_msg_to_stderr = true;  // 📣 keep prompts off stdout
 
 ## 🗺️ Known Limitations & Roadmap
 
-- 🪪 **Enrollment is out of scope** — the credential for the RP ID must already exist with
-  hmac-secret enabled. Roadmap: a one-time `make_credential` enrollment subcommand.
-- 🔑 **PIN fallback** not wired up; some authenticators require it for hmac-secret.
-- 🧪 **No automated tests** yet — the crate's `get_assertion` flow needs a mock/simulator layer.
+- 🔐 **PIN trade-off on `derive`** — where the device demands `pinUvAuth`, supplying `--pin`
+  bypasses the fingerprint (`uv = None`). Prefer a credential that authenticates with UV.
+- 🧪 **Hardware path not CI-tested** — the functional suite runs against `FakeDevice`; a real
+  `enroll`/`derive` round trip still needs a self-hosted runner or a manual smoke test.
 - 🧩 **Single device model** — only `096e:085d` / `096e:0866` are probed; consider `HidParam::get()`
   plus a first-match prompt for broader device support.
+- 🗑️ **No un-enrol command** — `enroll` can replace, but there is no standalone `unenrol`
+  subcommand yet.
 
 ---
 

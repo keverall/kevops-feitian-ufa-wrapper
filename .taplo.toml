@@ -1,0 +1,16 @@
+# TOML formatting and lint configuration for taplo (https://taplo.tamasfe.dev/).
+#
+# Used by `make fmt-toml`, `make fmt-check-toml` and `make toml-lint`.
+# `align_entries` is off so Cargo.toml keeps the idiomatic `key = value` layout.
+include = [ "Cargo.toml", ".taplo.toml" ]
+
+[formatting]
+align_entries = false
+align_comments = false
+array_trailing_comma = true
+allowed_blank_lines = 2
+compact_arrays = false
+compact_inline_tables = false
+indent_tables = false
+reorder_keys = false
+trailing_newline = true

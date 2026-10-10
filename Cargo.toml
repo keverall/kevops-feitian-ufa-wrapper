@@ -1,8 +1,39 @@
 [package]
 name = "kevops-feitian-ufa-wrapper"
+description = "Derive a deterministic AES-256 vault key from a Feitian BioPass FIDO2 hmac-secret credential."
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/keverall/kevops-feitian-ufa-wrapper"
+readme = "README.md"
+keywords = [ "fido2", "ctap2", "hmac-secret", "feitian", "vault" ]
+categories = [ "cryptography", "hardware-support" ]
 
 [dependencies]
 ctap-hid-fido2 = "3.6.0"
 sha2 = "0.11.0"
+
+# Lint gate. `clippy::all` is denied so `cargo clippy --all-targets -- -D warnings`
+# fails CI on any correctness/style/complexity/perf lint. `priority = -1` lets a
+# later, finer-grained entry override the group.
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+# Keep the crate warning-free under `-D warnings` without forbidding the obviously
+# fine cases in test doubles.
+unwrap_used = "allow"
+expect_used = "allow"
+
+# `unsafe_code` is forbidden outright; missing docs on the public API are warnings,
+# which CI promotes to errors via RUSTDOCFLAGS / clippy -D warnings.
+[lints.rust]
+unsafe_code = "forbid"
+# Public API is documented; CI promotes this to an error and also builds rustdoc.
+missing_docs = "warn"
+
+# Reproducible, stripped release artifact: build once, ship everywhere.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
