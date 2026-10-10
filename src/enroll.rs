@@ -2,7 +2,7 @@
 
 use crate::device::{StoredCredential, VaultDevice};
 use crate::error::VaultError;
-use crate::naming::{first_credential_name, next_credential_name};
+use crate::naming::{first_credential_name, is_vault_name, next_credential_name};
 
 /// The answer to "should the existing credentials be replaced?".
 pub type ReplaceDecision = Box<dyn Fn(&[StoredCredential]) -> bool>;
@@ -18,13 +18,19 @@ pub enum ReplacePolicy {
 }
 
 /// Register a new discoverable hmac-secret credential, name it sequentially, and,
-/// when replacing, remove the previous ones only after the new credential is
-/// confirmed.
+/// when replacing, remove only the previous *vault* credentials — and only after
+/// the new credential is confirmed.
+///
+/// Credentials that do not carry the vault name prefix are never deleted: they
+/// belong to something else that happens to share the RP id.
 ///
 /// Returns the assigned credential name.
 ///
 /// # Errors
-/// [`VaultError::Device`] when the transport or a CTAP call fails.
+/// [`VaultError::Device`] when the transport or a CTAP call fails,
+/// [`VaultError::NoReplaceableCredential`] when a replace was requested but no
+/// vault credential exists, and [`VaultError::CredentialCounterExhausted`] when
+/// the naming counter is exhausted.
 pub fn enroll_vault_credential(
     device: &dyn VaultDevice,
     pin: &str,
@@ -33,7 +39,8 @@ pub fn enroll_vault_credential(
     let existing = device.list_credentials(pin).map_err(VaultError::device)?;
 
     let replace = replace_decision(&policy, &existing);
-    let name = credential_name(replace, &existing);
+    let name = credential_name(replace, &existing)?;
+    let deletable = replaceable(existing.iter());
 
     let credential_id = device.create_credential(pin).map_err(VaultError::device)?;
     device
@@ -42,8 +49,10 @@ pub fn enroll_vault_credential(
 
     // Safety ordering: the new credential exists and is named before anything is
     // deleted, so a failure mid-replace never leaves the vault without a key.
+    // Deletion is not atomic: a failure stops the loop and leaves the already
+    // deleted credentials gone, which is why the new one is named first.
     if replace {
-        for credential in &existing {
+        for credential in deletable {
             device
                 .delete_credential(pin, &credential.credential_id)
                 .map_err(VaultError::device)?;
@@ -65,13 +74,20 @@ fn replace_decision(policy: &ReplacePolicy, existing: &[StoredCredential]) -> bo
 }
 
 /// Replacing restarts the sequence at `01`; adding continues it.
-fn credential_name(replace: bool, existing: &[StoredCredential]) -> String {
+fn credential_name(replace: bool, existing: &[StoredCredential]) -> Result<String, VaultError> {
     if replace {
-        return first_credential_name();
+        return Ok(first_credential_name());
     }
     let names: Vec<&str> = existing
         .iter()
         .map(|credential| credential.name.as_str())
         .collect();
     next_credential_name(&names)
+}
+
+/// The credentials a replace may delete: vault ones only.
+fn replaceable<'a>(
+    existing: impl Iterator<Item = &'a StoredCredential>,
+) -> impl Iterator<Item = &'a StoredCredential> {
+    existing.filter(|credential| is_vault_name(&credential.name))
 }

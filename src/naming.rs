@@ -1,6 +1,7 @@
 //! Sequential naming of enrolled vault credentials: `<PREFIX>01`, `<PREFIX>02`, ...
 
 use crate::config::CREDENTIAL_NAME_PREFIX;
+use crate::error::VaultError;
 
 /// Width of the zero-padded credential counter.
 const COUNTER_WIDTH: usize = 2;
@@ -10,12 +11,27 @@ pub fn first_credential_name() -> String {
     padded(1)
 }
 
+/// Whether `name` is a vault credential name produced by this tool.
+///
+/// Only credentials this tool created are renamed or deleted; foreign
+/// credentials sharing the RP id must survive a replace.
+pub fn is_vault_name(name: &str) -> bool {
+    name.starts_with(CREDENTIAL_NAME_PREFIX)
+}
+
 /// The next sequential name given the names already on the authenticator.
 ///
 /// Names that do not match the prefix, or whose counter does not parse, are
 /// ignored so foreign credentials never skew the sequence.
-pub fn next_credential_name(existing: &[&str]) -> String {
-    padded(highest_counter(existing) + 1)
+///
+/// # Errors
+/// [`VaultError::CredentialCounterExhausted`] when the counter has no successor,
+/// which is only reachable at `u32::MAX`.
+pub fn next_credential_name(existing: &[&str]) -> Result<String, VaultError> {
+    let next = highest_counter(existing)
+        .checked_add(1)
+        .ok_or(VaultError::CredentialCounterExhausted)?;
+    Ok(padded(next))
 }
 
 /// The counter encoded in `<PREFIX>nn`, if the name matches and parses.
@@ -56,7 +72,7 @@ mod tests {
         ];
         let names: Vec<&str> = existing.iter().map(String::as_str).collect();
         assert_eq!(
-            next_credential_name(&names),
+            next_credential_name(&names).unwrap(),
             format!("{CREDENTIAL_NAME_PREFIX}03")
         );
     }
@@ -66,7 +82,7 @@ mod tests {
         let existing = [format!("{CREDENTIAL_NAME_PREFIX}07")];
         let names: Vec<&str> = existing.iter().map(String::as_str).collect();
         assert_eq!(
-            next_credential_name(&names),
+            next_credential_name(&names).unwrap(),
             format!("{CREDENTIAL_NAME_PREFIX}08")
         );
     }
@@ -75,7 +91,7 @@ mod tests {
     fn foreign_names_fall_back_to_one() {
         let names = ["bitwarden-login", "cachyos-host"];
         assert_eq!(
-            next_credential_name(&names),
+            next_credential_name(&names).unwrap(),
             format!("{CREDENTIAL_NAME_PREFIX}01")
         );
     }
@@ -83,7 +99,7 @@ mod tests {
     #[test]
     fn empty_inventory_starts_at_one() {
         assert_eq!(
-            next_credential_name(&[]),
+            next_credential_name(&[]).unwrap(),
             format!("{CREDENTIAL_NAME_PREFIX}01")
         );
     }
@@ -93,9 +109,25 @@ mod tests {
         let existing = [format!("{CREDENTIAL_NAME_PREFIX}099")];
         let names: Vec<&str> = existing.iter().map(String::as_str).collect();
         assert_eq!(
-            next_credential_name(&names),
+            next_credential_name(&names).unwrap(),
             format!("{CREDENTIAL_NAME_PREFIX}100")
         );
+    }
+
+    #[test]
+    fn counter_exhaustion_is_an_error_not_a_wraparound() {
+        let exhausted = format!("{CREDENTIAL_NAME_PREFIX}{}", u32::MAX);
+        assert_eq!(
+            next_credential_name(&[&exhausted]),
+            Err(VaultError::CredentialCounterExhausted)
+        );
+    }
+
+    #[test]
+    fn only_names_with_the_vault_prefix_are_ours() {
+        assert!(is_vault_name(&format!("{CREDENTIAL_NAME_PREFIX}01")));
+        assert!(!is_vault_name("bitwarden-login"));
+        assert!(!is_vault_name(&format!("other-{CREDENTIAL_NAME_PREFIX}01")));
     }
 
     #[test]

@@ -13,6 +13,10 @@ pub enum VaultError {
     NoAssertion,
     /// The assertion carried no hmac-secret output.
     MissingHmacSecret,
+    /// No vault-owned credential matched the name prefix while replacing.
+    NoReplaceableCredential,
+    /// The sequential credential-name counter cannot be incremented further.
+    CredentialCounterExhausted,
     /// A transport or CTAP failure reported by the authenticator.
     Device(String),
 }
@@ -27,6 +31,12 @@ impl fmt::Display for VaultError {
             Self::NoAssertion => write!(f, "no assertion returned by the authenticator"),
             Self::MissingHmacSecret => {
                 write!(f, "the authenticator returned no hmac-secret output")
+            }
+            Self::NoReplaceableCredential => {
+                write!(f, "no vault-owned credential found to replace")
+            }
+            Self::CredentialCounterExhausted => {
+                write!(f, "credential name counter exhausted; rename the oldest credential")
             }
             Self::Device(message) => write!(f, "{message}"),
         }
@@ -45,6 +55,7 @@ impl VaultError {
     pub fn exit_code(&self) -> u8 {
         match self {
             Self::MissingPin | Self::UnknownCommand(_) => 2,
+            Self::NoReplaceableCredential | Self::CredentialCounterExhausted => 2,
             _ => 1,
         }
     }
@@ -68,6 +79,13 @@ mod tests {
         assert_eq!(VaultError::UnknownCommand("x".into()).exit_code(), 2);
         assert_eq!(VaultError::NoAssertion.exit_code(), 1);
         assert_eq!(VaultError::Device("boom".into()).exit_code(), 1);
+    }
+
+    #[test]
+    fn replace_and_naming_errors_are_user_fixable() {
+        // Both mean the operator must act before retrying, not a device fault.
+        assert_eq!(VaultError::NoReplaceableCredential.exit_code(), 2);
+        assert_eq!(VaultError::CredentialCounterExhausted.exit_code(), 2);
     }
 
     #[test]

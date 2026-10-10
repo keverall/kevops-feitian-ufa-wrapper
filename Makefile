@@ -1,117 +1,115 @@
-# KevOps Feitian UFA wrapper - local quality gates.
+# =============================================================================
+# KevOps Feitian UFA Wrapper - Makefile
+# =============================================================================
+# Common Rust development and CI tasks for local and offline use.
 #
-# `make ci` mirrors .github/workflows/ci.yml, so you can reproduce CI offline.
-# Add STRICT=1 to turn "tool missing" into a hard failure instead of a skip.
+# Quick start:
+#   make check            # Run the required local quality gates
+#   make test             # Run unit, integration, and documentation tests
+#   make ci               # Run the full quality gate including optional tools
+#   make run              # Derive the vault key from the connected device
+#   make enroll PIN=<pin> # Enrol or replace the vault credential
+#
+# Optional tools (taplo, cargo-audit) skip locally and fail with STRICT=1:
+#   make STRICT=1 ci
+# =============================================================================
+
+# ─── Configuration ───────────────────────────────────────────────────────────
+CARGO  ?= cargo
+STRICT ?= 0
 
 .DEFAULT_GOAL := ci
-SHELL := /bin/bash
+.SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-CARGO ?= cargo
-PIN   ?= 1234
-
 # guarded <tool> <command...> <install-hint>
-# Runs <command> when <tool> is on PATH. Missing tools skip the step with a hint,
-# unless STRICT=1 makes it a hard error.
+# Runs <command> when <tool> is on PATH. Missing tools skip the step with an
+# install hint on stderr, unless STRICT=1 turns the skip into a hard failure.
 guarded = \
 	if command -v $(1) >/dev/null 2>&1; then $(2); \
-	elif [ "$${STRICT:-0}" = "1" ]; then echo "error: $(1) not found - install with: $(3)" >&2; exit 1; \
-	else echo "skip: $(1) not found - install with: $(3)"; fi
+	elif [ "$(STRICT)" = "1" ]; then \
+		echo "error: $(1) not found - install with: $(3)" >&2; exit 1; \
+	else \
+		echo "skip: $(1) not found - install with: $(3)" >&2; \
+	fi
 
-## help: list the available targets
-.PHONY: help
-help:
-	@echo "Targets:" ; grep -hE '^## ' $(MAKEFILE_LIST) | sed 's/## /  /'
+.PHONY: help build release fmt fmt-rust fmt-toml fmt-check fmt-check-rust \
+	fmt-check-toml toml-lint lint-rust lint test audit doc check ci run enroll \
+	clean
 
-## build: debug build of the library and binary
-.PHONY: build
-build:
-	$(CARGO) build --all-targets
+# ─── Help ────────────────────────────────────────────────────────────────────
 
-## release: reproducible, stripped release artifact
-.PHONY: release
-release:
-	$(CARGO) build --release
+help: ## List the available targets
+	@echo "Targets:"
+	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | sed -E 's/^([a-z-]+):.*## /\1  -  /'
 
-## fmt: format Rust and TOML sources in place
-.PHONY: fmt
-fmt: fmt-rust fmt-toml
+# ─── Build ───────────────────────────────────────────────────────────────────
 
-## fmt-rust: cargo fmt --all
-.PHONY: fmt-rust
-fmt-rust:
+build: ## Build the library and binary in debug mode
+	$(CARGO) build --all-targets --locked
+
+release: ## Build the stripped, optimized release artifact
+	$(CARGO) build --release --locked
+
+# ─── Formatting ──────────────────────────────────────────────────────────────
+
+fmt: fmt-rust fmt-toml ## Format all Rust and TOML sources in place
+
+fmt-rust: ## Format Rust sources with rustfmt
 	$(CARGO) fmt --all
 
-## fmt-toml: taplo fmt
-.PHONY: fmt-toml
-fmt-toml:
+fmt-toml: ## Format TOML sources with taplo (optional)
 	@$(call guarded,taplo,taplo fmt,cargo install taplo-cli --locked)
 
-## fmt-check: fail when formatting is off
-.PHONY: fmt-check
-fmt-check: fmt-check-rust fmt-check-toml
+fmt-check: fmt-check-rust fmt-check-toml ## Verify all sources are formatted
 
-## fmt-check-rust: cargo fmt --all --check
-.PHONY: fmt-check-rust
-fmt-check-rust:
+fmt-check-rust: ## Fail when Rust sources are not formatted
 	$(CARGO) fmt --all --check
 
-## fmt-check-toml: taplo fmt --check
-.PHONY: fmt-check-toml
-fmt-check-toml:
+fmt-check-toml: ## Verify TOML formatting with taplo (optional)
 	@$(call guarded,taplo,taplo fmt --check,cargo install taplo-cli --locked)
 
-## toml-lint: schema-aware TOML lint
-.PHONY: toml-lint
-toml-lint:
+toml-lint: ## Lint TOML syntax and style with taplo (optional)
 	@$(call guarded,taplo,taplo lint --config .taplo.toml,cargo install taplo-cli --locked)
 
-## lint-rust: cargo clippy --all-targets -- -D warnings
-.PHONY: lint-rust
-lint-rust:
-	$(CARGO) clippy --all-targets -- -D warnings
+# ─── Lint and documentation ───────────────────────────────────────────────────
 
-## lint: clippy, formatting and documentation gates together
-.PHONY: lint
-lint: fmt-check lint-rust doc
+lint-rust: ## Lint Rust with Clippy, warnings denied
+	$(CARGO) clippy --all-targets --locked -- -D warnings
 
-## test: unit, functional and doc tests
-.PHONY: test
-test:
-	$(CARGO) test --all-targets
-	$(CARGO) test --doc
+doc: ## Build rustdoc, warnings denied
+	RUSTDOCFLAGS="-D warnings" $(CARGO) doc --locked --no-deps --document-private-items
 
-## audit: rustsec vulnerability scan
-.PHONY: audit
-audit:
+lint: fmt-check lint-rust doc ## Run formatting, lint, and documentation checks
+
+# ─── Tests and security ───────────────────────────────────────────────────────
+
+test: ## Run unit, integration, and documentation tests
+	$(CARGO) test --all-targets --locked
+	$(CARGO) test --doc --locked
+
+audit: ## Scan dependencies for advisories with cargo-audit (optional)
 	@$(call guarded,cargo-audit,$(CARGO) audit --deny warnings,cargo install cargo-audit --locked)
 
-## udeps: unused dependency scan (nightly)
-.PHONY: udeps
-udeps:
-	@$(call guarded,cargo-udeps,$(CARGO) +nightly udeps --all-targets,cargo install cargo-udeps --locked)
+# Required local gate: every available check must pass, optional tools excluded.
+check: fmt-check lint-rust test doc ## Run the required local quality gates
+	@echo "check: all gates green"
 
-## doc: rustdoc, warnings denied
-.PHONY: doc
-doc:
-	RUSTDOCFLAGS="-D warnings" $(CARGO) doc --no-deps --document-private-items
+# Full CI gate: required checks plus the optional TOML and supply-chain gates.
+# STRICT=1 makes a missing optional tool a failure instead of a skip.
+ci: check toml-lint audit ## Run the full CI quality gate
+	@echo "ci: all gates green"
 
-## ci: the full offline gate
-.PHONY: ci
-ci: fmt-check toml-lint lint-rust test doc
-	@echo "all gates green"
+# ─── Device operations ────────────────────────────────────────────────────────
 
-## run: derive the vault key (needs the device)
-.PHONY: run
-run:
-	$(CARGO) run --quiet --
+run: ## Derive the vault key using the connected authenticator
+	$(CARGO) run --quiet --locked --
 
-## enroll: register or replace the vault credential (PIN=<pin>)
-.PHONY: enroll
-enroll:
-	$(CARGO) run --quiet -- enroll --pin $(PIN)
+enroll: ## Enrol or replace the vault credential; requires PIN=<pin>
+	@test -n "$(PIN)" || (echo "usage: make enroll PIN=<pin>" >&2; exit 2)
+	$(CARGO) run --quiet --locked -- enroll --pin "$(PIN)"
 
-## clean: remove build artifacts
-.PHONY: clean
-clean:
+# ─── Cleanup ──────────────────────────────────────────────────────────────────
+
+clean: ## Remove Cargo build artifacts
 	$(CARGO) clean

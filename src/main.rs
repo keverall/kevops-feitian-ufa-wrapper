@@ -9,7 +9,7 @@ use std::process::ExitCode;
 use kevops_feitian_ufa_wrapper::cli::{self, Command};
 use kevops_feitian_ufa_wrapper::config::{RP_ID, SALT_LABEL};
 use kevops_feitian_ufa_wrapper::crypto;
-use kevops_feitian_ufa_wrapper::derive::{self, KEY_DERIVED_MESSAGE};
+use kevops_feitian_ufa_wrapper::derive::{self, key_derived_message, TOUCH_PROMPT};
 use kevops_feitian_ufa_wrapper::device::{
     FidoKeyHidDevice, StoredCredential, VaultDevice, open_device,
 };
@@ -53,9 +53,9 @@ fn with_device(
 
 /// stdout carries the 64-char key only; every human message goes to stderr.
 fn print_vault_key(device: &dyn VaultDevice, pin: Option<&str>) -> Result<(), Failure> {
-    eprintln!("{}", derive::TOUCH_PROMPT);
+    eprintln!("{}", TOUCH_PROMPT);
     let key = derive::derive_vault_key(device, SALT_LABEL, pin).map_err(Failure::runtime)?;
-    eprintln!("{KEY_DERIVED_MESSAGE}");
+    eprintln!("{}", key_derived_message(pin));
     print!("{}", crypto::encode_key(&key));
     std::io::stdout().flush().map_err(Failure::runtime)?;
     Ok(())

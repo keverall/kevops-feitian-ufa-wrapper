@@ -10,6 +10,21 @@ pub const TOUCH_PROMPT: &str = "⚡ Please tap the Feitian BioPass fingerprint s
 /// User-facing confirmation, printed to stderr once the key is derived.
 pub const KEY_DERIVED_MESSAGE: &str = "🔓 Fingerprint verified! 256-bit Vault key derived.";
 
+/// User-facing confirmation for PIN-authorised derivation.
+///
+/// A PIN-authorised assertion sets `uv = None`, so the fingerprint is **not**
+/// re-checked and this must not claim otherwise.
+pub const KEY_DERIVED_WITH_PIN_MESSAGE: &str =
+    "🔐 PIN verified! 256-bit Vault key derived (fingerprint was NOT re-checked).";
+
+/// The confirmation for a derivation, chosen by how it was authorised.
+pub fn key_derived_message(pin: Option<&str>) -> &'static str {
+    match pin {
+        Some(_) => KEY_DERIVED_WITH_PIN_MESSAGE,
+        None => KEY_DERIVED_MESSAGE,
+    }
+}
+
 /// Derive the 32-byte AES-256 vault key from the authenticator.
 ///
 /// Presentational output is the caller's job, so this stays testable: it only
@@ -90,6 +105,19 @@ mod tests {
         )
         .expect("a secret yields a key");
         assert_eq!(key, crypto::derive_vault_key(&secret));
+    }
+
+    #[test]
+    fn the_pin_derivation_message_never_claims_a_fingerprint_was_used() {
+        let message = key_derived_message(Some("123456"));
+        assert!(!message.contains("Fingerprint"));
+        assert!(message.contains("PIN"));
+        assert!(message.contains("NOT re-checked"));
+    }
+
+    #[test]
+    fn uv_derivation_reports_the_fingerprint() {
+        assert_eq!(key_derived_message(None), KEY_DERIVED_MESSAGE);
     }
 
     #[test]
