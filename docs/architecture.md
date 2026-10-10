@@ -1,5 +1,14 @@
 # Architecture — Feitian UFA wrapper
 
+## Contents
+
+1. [The transport boundary](#1-the-transport-boundary) — why only one file touches USB/HID.
+2. [Derive flow](#2-derive-flow) — `hmac_secret` → SHA-256 → stdout.
+3. [Enrolment flow (R/A, replace, rename, delete)](#3-enrolment-flow-r-a-replace-rename-delete) — and [The ordering invariant](#31-the-ordering-invariant).
+4. [Naming scheme](#4-naming-scheme) — the `wrapperNN` rule.
+5. [Configuration reference](#5-configuration-reference).
+6. [Stream discipline](#6-stream-discipline-why-stdout-is-exactly-64-chars).
+
 This document explains *how* the vault key is produced and enrolment is managed,
 independently of the Feitian hardware. It is the durable companion to the
 high-level diagram in [`../README.md`](../README.md#architecture).

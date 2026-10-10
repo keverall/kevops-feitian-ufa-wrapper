@@ -9,6 +9,34 @@
 
 ---
 
+```
+./
+├── docs/
+│   └── architecture.md
+├── src/
+│   ├── cli.rs
+│   ├── config.rs
+│   ├── crypto.rs
+│   ├── derive.rs
+│   ├── device.rs
+│   ├── enroll.rs
+│   ├── error.rs
+│   ├── lib.rs
+│   ├── main.rs
+│   └── naming.rs
+├── tests/
+│   ├── common/
+│   ├── cli_contract.rs
+│   ├── derive_flow.rs
+│   └── enroll_flow.rs
+├── Cargo.lock
+├── Cargo.toml
+├── Makefile
+└── README.md
+
+5 directories, 18 files
+```
+
 ## 🧭 Overview
 
 The wrapper asks a Feitian BioPass USB authenticator to compute
@@ -57,7 +85,13 @@ against a recording fake with no BioPass attached.
 | `src/main.rs` | argument handling and presentation only |
 
 The full data-flow diagrams and the credential-management command surface live in
-[`docs/architecture.md`](docs/architecture.md).
+[`docs/architecture.md`](docs/architecture.md):
+
+- [Derive flow](docs/architecture.md#2-derive-flow) — `hmac_secret → SHA-256 → stdout`.
+- [Enrolment flow](docs/architecture.md#3-enrolment-flow-r-a-replace-rename-delete) — R/A, the ordering invariant, and why deletes come last.
+- [Stream discipline](docs/architecture.md#6-stream-discipline-why-stdout-is-exactly-64-chars) — the "stdout = 64 chars only" guarantee and its test.
+
+
 
 ```mermaid
 flowchart LR
@@ -77,36 +111,6 @@ flowchart LR
     A --> B --> C --> D
     C --> E --> F --> G
     classDef m fill:#242a32,stroke:#334155,color:#e2e8f0,stroke-width:1px;
-```
-
-### 📁 Project tree
-
-`./target` and `.git` are excluded for clarity.
-
-```text
-kevops-feitian-ufa-wrapper/
-├── Cargo.lock
-├── Cargo.toml
-├── Makefile              # quality gates + dev shortcuts (make ci / help)
-├── README.md
-├── .taplo.toml           # taplo format/lint config
-├── docs/
-│   └── architecture.md   # data-flow diagrams and the VaultDevice contract
-├── src/
-│   ├── lib.rs            # #![forbid(unsafe_code)], module map
-│   ├── main.rs           # parse -> wire device -> render  (thin CLI front-end)
-│   ├── cli.rs            # Command / parse_args
-│   ├── config.rs         # RP_ID, salt label, identity, name prefix
-│   ├── crypto.rs         # derive_vault_key, to_hex   (pure, doctests)
-│   ├── naming.rs         # wrapper01/wrapper02 sequence
-│   ├── device.rs         # VaultDevice trait + FidoKeyHidDevice (USB)
-│   ├── derive.rs         # key derivation flow
-│   └── enroll.rs         # enrolment flow (R/A, replace, rename, delete)
-└── tests/
-    ├── common/mod.rs     # FakeDevice: records calls in order
-    ├── cli_contract.rs
-    ├── derive_flow.rs
-    └── enroll_flow.rs
 ```
 
 > `.github/workflows/ci.yml` is **not** committed yet — it is shown as a
@@ -343,7 +347,7 @@ cfg.enable_log = true;                 // 🕵️ verbose CTAP/HID hex tracing (
 | `no assertion returned` | 🪪 No credential registered for the RP ID — enroll with `CredentialExtension::HmacSecret(Some(true))` first |
 | No hmac-secret output, finger accepted | 🔑 Many authenticators require a `pinUvAuthToken`; supply a PIN via `derive --pin <pin>` (note: this sets `uv = None`) |
 | `response_status err = 0x36 CTAP2_ERR_PIN_REQUIRED` | 🔐 This BioPass requires `pinUvAuth` for the hmac-secret extension: re-run with `--pin <pin>` (this is what `src/device.rs::hmac_secret` forwards) |
-| `user_tests` / build fails on `missing_docs` | 📝 Public API must be documented; add a `///` doc comment to the item (the README's "docs as code" gate) |
+| Build fails on the `missing_docs` lint | 📝 Public API must be documented; add a `///` doc comment to the item (the README's "docs as code" gate) |
 | Permission denied opening hidraw | 🦶 Re-apply the udev rule and verify `groups` includes `plugdev` |
 | Fingerprint never triggers | 👆 Ensure a fingerprint is enrolled and the device is not in U2F-only mode |
 
