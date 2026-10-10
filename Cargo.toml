@@ -1,0 +1,8 @@
+[package]
+name = "kevops-feitian-ufa-wrapper"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ctap-hid-fido2 = "3.6.0"
+sha2 = "0.11.0"
