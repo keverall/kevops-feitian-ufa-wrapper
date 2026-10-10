@@ -33,13 +33,7 @@
 ```bash
 eza --tree --level=2 --git-ignore --icons=always --group-directories-first
 ```
-
-<picture>
-  <!-- GitHub switches to this asset ONLY when the browser/system explicitly requests Dark Mode -->
-  <source media="(prefers-color-scheme: dark)" srcset="img/TREE.jpg">
-  <!-- Fallback: GitHub automatically uses this for Light Mode and all standard renderers -->
-  <img alt="Project Structure Tree" src="img/TREE_LIGHT.jpg">
-</picture>
+![alt text](img/TREE.jpg)
 
 ## 🧭 Overview
 
