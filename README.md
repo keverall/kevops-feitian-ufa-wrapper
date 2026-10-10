@@ -9,7 +9,7 @@
 
 ---
 
-```
+```text
 eza --tree --level=2 --git-ignore --icons=always --group-directories-first33:22 
  .
 ├──  docs
