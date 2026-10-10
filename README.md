@@ -33,8 +33,15 @@
 ```bash
 eza --tree --level=2 --git-ignore --icons=always --group-directories-first
 ```
+<picture>
+  <!-- Displayed automatically if the user uses Dark Mode -->
+  <source media="(prefers-color-scheme: dark)" srcset="img/TREE.jpg">
+  <!-- Fallback: A light-themed terminal snap or a clean text block -->
+  <source media="(prefers-color-scheme: light)" srcset="img/TREE_LIGHT.jpg">
+  <!-- Default Fallback -->
+  <img alt="Project Structure Tree" src="img/TREE.jpg">
+</picture>
 ![alt text](img/TREE.jpg)
-
 
 ## 🧭 Overview
 
