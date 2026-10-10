@@ -10,6 +10,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Open the USB HID connection to the Feitian BioPass.
     //    new() walks the list and opens the first device that matches.
     //    0x096e/0x085d = BioPass, 0x096e/0x0866 = All-in-Pass (fallback).
+    let mut cfg = Cfg::init();
+    // Route the in-protocol "tap" prompt to stderr so stdout stays a clean key channel.
+    cfg.enable_keep_alive_msg = true;
+    cfg.keep_alive_msg_to_stderr = true;
+
     let device = FidoKeyHid::new(
         &[
             HidParam::VidPid {
@@ -21,10 +26,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 pid: 0x0866,
             },
         ],
-        &Cfg::init(),
+        &cfg,
     )?;
 
-    println!("⚡ Please tap the Feitian BioPass fingerprint sensor...");
+    eprintln!("⚡ Please tap the Feitian BioPass fingerprint sensor...");
 
     // 2. Build the hmac-secret extension input for this specific vault database.
     //    The salt MUST be exactly 32 bytes, so the label is hashed into place
@@ -64,9 +69,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|byte| format!("{:02x}", byte))
         .collect();
 
-    println!(
-        "🔓 Fingerprint verified! 256-bit Vault key derived: {}",
-        hex_key
-    );
+    // stdout carries ONLY the 64-char hex key for clean piping / Command::output().
+    eprintln!("🔓 Fingerprint verified! 256-bit Vault key derived.");
+    print!("{}", hex_key);
     Ok(())
 }
