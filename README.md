@@ -10,29 +10,30 @@
 ---
 
 ```
-./
-├── docs/
-│   └── architecture.md
-├── src/
-│   ├── cli.rs
-│   ├── config.rs
-│   ├── crypto.rs
-│   ├── derive.rs
-│   ├── device.rs
-│   ├── enroll.rs
-│   ├── error.rs
-│   ├── lib.rs
-│   ├── main.rs
-│   └── naming.rs
-├── tests/
-│   ├── common/
-│   ├── cli_contract.rs
-│   ├── derive_flow.rs
-│   └── enroll_flow.rs
-├── Cargo.lock
-├── Cargo.toml
-├── Makefile
-└── README.md
+eza --tree --level=2 --git-ignore --icons=always --group-directories-first33:22 
+ .
+├──  docs
+│   └──  architecture.md
+├── 󰣞 src
+│   ├──  cli.rs
+│   ├──  config.rs
+│   ├──  crypto.rs
+│   ├──  derive.rs
+│   ├──  device.rs
+│   ├──  enroll.rs
+│   ├──  error.rs
+│   ├──  lib.rs
+│   ├──  main.rs
+│   └──  naming.rs
+├──  tests
+│   ├──  common
+│   ├──  cli_contract.rs
+│   ├──  derive_flow.rs
+│   └──  enroll_flow.rs
+├──  Cargo.lock
+├──  Cargo.toml
+├──  Makefile
+└── 󰂺 README.md
 
 5 directories, 18 files
 ```
