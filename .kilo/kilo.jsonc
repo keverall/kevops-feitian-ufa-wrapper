@@ -1,0 +1,6 @@
+dfs{
+  "$schema": "https://app.kilo.ai/config.json",
+  "commit_message": {
+    "prompt": "use devops principals best practice branch and commit message naming and message standards"
+  }
+}
