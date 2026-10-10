@@ -8,35 +8,33 @@
 [![Crate](https://img.shields.io/badge/ctap--hid--fido2-3.6.0-green.svg)](https://crates.io/crates/ctap-hid-fido2)
 
 ---
+- [🔐 KevOps Feitian UFA Wrapper](#-kevops-feitian-ufa-wrapper)
+  - [Project Structure Tree](#project-structure-tree)
+  - [🧭 Overview](#-overview)
+  - [🧩 Architecture](#-architecture)
+    - [📈 Key-derivation data flow](#-key-derivation-data-flow)
+  - [✅ Prerequisites](#-prerequisites)
+    - [🦶 udev rule (required on Linux)](#-udev-rule-required-on-linux)
+  - [🚀 Quickstart](#-quickstart)
+  - [🏗️ DevOps Principles \& Best Practices](#️-devops-principles--best-practices)
+    - [🎯 Core principles applied](#-core-principles-applied)
+    - [🧪 Quality gates](#-quality-gates)
+    - [🔁 CI pipeline](#-ci-pipeline)
+    - [🔖 Release \& versioning](#-release--versioning)
+  - [🧬 Testing](#-testing)
+  - [🔐 Security Model](#-security-model)
+  - [📊 Observability](#-observability)
+  - [🧯 Troubleshooting](#-troubleshooting)
+  - [🗺️ Known Limitations \& Roadmap](#️-known-limitations--roadmap)
+  - [📚 References](#-references)
 
-```markdown
+## Project Structure Tree
+
+```bash
 eza --tree --level=2 --git-ignore --icons=always --group-directories-first
- .
-├──  docs
-│   └──  architecture.md
-├── 󰣞 src
-│   ├──  cli.rs
-│   ├──  config.rs
-│   ├──  crypto.rs
-│   ├──  derive.rs
-│   ├──  device.rs
-│   ├──  enroll.rs
-│   ├──  error.rs
-│   ├──  lib.rs
-│   ├──  main.rs
-│   └──  naming.rs
-├──  tests
-│   ├──  common
-│   ├──  cli_contract.rs
-│   ├──  derive_flow.rs
-│   └──  enroll_flow.rs
-├──  Cargo.lock
-├──  Cargo.toml
-├──  Makefile
-└── 󰂺 README.md
-
-5 directories, 18 files
 ```
+![alt text](img/TREE.jpg)
+
 
 ## 🧭 Overview
 
