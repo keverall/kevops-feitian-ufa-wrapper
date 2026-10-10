@@ -5,6 +5,7 @@ use ctap_hid_fido2::public_key_credential_user_entity::PublicKeyCredentialUserEn
 use ctap_hid_fido2::verifier;
 use ctap_hid_fido2::{Cfg, FidoKeyHid, HidParam};
 use sha2::{Digest, Sha256};
+use std::io::{self, Write};
 use std::process::exit;
 
 const RP_ID: &str = "bitwarden-alternative.kevops";
@@ -12,6 +13,10 @@ const VAULT_SALT: &str = "kevops-vault-encryption-salt-xyz";
 const USER_ID: &[u8] = b"kevops-vault-user";
 const USER_NAME: &str = "kevops-vault";
 const USER_DISPLAY: &str = "KevOps Vault";
+
+/// Sequential display-name prefix for enrolled vault credentials.
+/// The suffix is zero-padded ascending: wrapper01, wrapper02, wrapper03, ...
+const CRED_NAME_PREFIX: &str = "kevops-feitan-ufa-passwordless-wrapper";
 
 /// Open the Feitian BioPass over USB HID.
 /// The in-protocol "tap" keep-alive prompt is routed to stderr so that stdout
@@ -82,31 +87,100 @@ fn derive(device: &FidoKeyHid) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Register a dedicated, discoverable credential with the hmac-secret extension
-/// enabled. This is the one-time enrollment the vault key derivation depends on.
-fn enroll(device: &FidoKeyHid, pin: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
-    eprintln!("⚡ Enroll: tap the BioPass sensor to register the vault credential...");
+/// Register (and optionally replace) a dedicated, discoverable credential with the
+/// hmac-secret extension enabled, then rename it to a sequential `wrapperNN` label.
+///
+/// Credential management (enumerate / delete / rename) requires PIN auth, so `pin`
+/// is mandatory for this subcommand.
+fn enroll(device: &FidoKeyHid, pin: &str) -> Result<(), Box<dyn std::error::Error>> {
+    // 1. Discover any credentials already registered under our RP.
+    let rps = device.credential_management_enumerate_rps(Some(pin))?;
+    let existing_creds: Vec<_> = match rps
+        .iter()
+        .find(|rp| rp.public_key_credential_rp_entity.id == RP_ID)
+    {
+        Some(rp) => device.credential_management_enumerate_credentials(Some(pin), &rp.rpid_hash)?,
+        None => Vec::new(),
+    };
 
+    // 2. If one exists, ask whether to replace it or add another.
+    let mut replace_existing = false;
+    if !existing_creds.is_empty() {
+        eprintln!(
+            "ℹ️ Found {} existing vault credential(s) for RP '{}'.",
+            existing_creds.len(),
+            RP_ID
+        );
+        eprint!("   Replace existing (R) or add a new one (A)? [R/A]: ");
+        io::stderr().flush()?;
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        // Explicit "R" replaces; anything else (including Enter) adds.
+        replace_existing = input.trim().eq_ignore_ascii_case("R");
+        eprintln!(
+            "   -> {}",
+            if replace_existing {
+                "replacing existing credential(s)"
+            } else {
+                "adding a new credential"
+            }
+        );
+    }
+
+    // 3. Decide the sequential name. Replacing restarts at 01; adding continues
+    //    the ascending sequence parsed from existing wrapperNN labels.
+    let next_nn = if replace_existing {
+        1
+    } else {
+        let mut max = 0u32;
+        for c in &existing_creds {
+            let parsed = c
+                .public_key_credential_user_entity
+                .name
+                .strip_prefix(CRED_NAME_PREFIX)
+                .and_then(|s| s.parse::<u32>().ok());
+            if let Some(n) = parsed {
+                max = max.max(n);
+            }
+        }
+        max + 1
+    };
+
+    // 4. Create the discoverable hmac-secret credential.
+    eprintln!("⚡ Enroll: tap the BioPass sensor to register the vault credential...");
     let challenge = verifier::create_challenge();
     let user =
         PublicKeyCredentialUserEntity::new(Some(USER_ID), Some(USER_NAME), Some(USER_DISPLAY));
-
-    let mut builder = MakeCredentialArgsBuilder::new(RP_ID, &challenge)
+    let args = MakeCredentialArgsBuilder::new(RP_ID, &challenge)
         .resident_key()
         .extensions(&[CredentialExtension::HmacSecret(Some(true))])
-        .user_entity(&user);
+        .user_entity(&user)
+        .pin(pin)
+        .build();
 
-    // If the authenticator requires a PIN for registration, supply it here.
-    // (Passing a PIN sets uv = None; the fingerprint still gates later derives.)
-    if let Some(pin) = pin {
-        builder = builder.pin(pin);
+    let attestation = device.make_credential_with_args(&args)?;
+    let new_descriptor = attestation.credential_descriptor;
+
+    // 5. Rename the just-created credential to its sequential wrapperNN label.
+    //    Keep the same user.id handle; only the name/display name change.
+    let new_name = format!("{}{:02}", CRED_NAME_PREFIX, next_nn);
+    let renamed =
+        PublicKeyCredentialUserEntity::new(Some(USER_ID), Some(&new_name), Some(&new_name));
+    device.credential_management_update_user_information(Some(pin), new_descriptor, renamed)?;
+
+    // 6. Only after the new credential is confirmed do we drop the old ones (replace).
+    if replace_existing {
+        for c in existing_creds {
+            device.credential_management_delete_credential(
+                Some(pin),
+                c.public_key_credential_descriptor,
+            )?;
+        }
     }
-    let args = builder.build();
 
-    let _attestation = device.make_credential_with_args(&args)?;
     eprintln!(
-        "✅ Enrolled vault credential for RP '{}'. Run without arguments to derive the key.",
-        RP_ID
+        "✅ Enrolled vault credential '{}' for RP '{}'. Run without arguments to derive the key.",
+        new_name, RP_ID
     );
     Ok(())
 }
@@ -123,11 +197,19 @@ fn main() {
                     .position(|a| a == "--pin")
                     .and_then(|i| args.get(i + 1))
                     .map(String::as_str);
-                enroll(&device, pin)
+                match pin {
+                    Some(p) => enroll(&device, p),
+                    None => {
+                        eprintln!(
+                            "enroll requires a PIN: kevops-feitian-ufa-wrapper enroll --pin <pin>"
+                        );
+                        Err("missing --pin".into())
+                    }
+                }
             }
             Some(other) => {
                 eprintln!("unknown subcommand: {}", other);
-                eprintln!("usage: kevops-feitian-ufa-wrapper [enroll [--pin <pin>]]");
+                eprintln!("usage: kevops-feitian-ufa-wrapper [enroll --pin <pin>]");
                 Err("unknown subcommand".into())
             }
             None => derive(&device),
