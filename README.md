@@ -183,9 +183,9 @@ cd kevops-feitian-ufa-wrapper
 cargo check            # 🧪 fast feedback
 cargo build --release  # 📦 optimized artifact
 
-cargo run --release                          # 👆 prompts for the fingerprint
-cargo run --release -- enroll                 # 🪪 prompts securely for the device PIN
-cargo run --release -- enroll --pin 123456   # 🪪 non-interactive compatibility form
+cargo run --release                   # 👆 prompts for the fingerprint
+cargo run --release -- enroll          # 🪪 prompts securely for the device PIN
+cargo run --release -- enroll --pin 123456 # 🪪 non-interactive compatibility form
 
 make ci        # 🧰 full offline gate: fmt + toml-lint + clippy + test + doc
 ```
@@ -213,12 +213,17 @@ $ cargo run --release
 | Command | Description |
 |---|---|
 | `cargo run --release` | Derive the deterministic 256-bit vault key; prompts for fingerprint verification and writes exactly 64 hex characters to stdout. |
-| `cargo run --release -- derive [--pin <pin>]` | Explicit derive form; optionally uses PIN authorization when the authenticator requires it. |
+| `cargo run --release -- derive` | Explicit derive form using fingerprint verification. |
+| `cargo run --release -- derive --pin 123456` | Explicit derive form using PIN authorization; replace the example PIN with the device PIN. |
 | `cargo run --release -- enroll` | Securely prompts for the device PIN, then enrolls a new credential and interactively chooses whether to add or replace project-owned credentials. |
-| `cargo run --release -- enroll --pin <pin>` | Non-interactive enrollment form for automation; the PIN remains visible to shell history/process listings. |
+| `cargo run --release -- enroll --pin 123456` | Non-interactive enrollment form; replace the example PIN and note that it remains visible to shell history/process listings. |
 | `cargo run --release -- list` | Securely prompts for the PIN and lists resident credentials for the project RP without modifying the authenticator. |
 | `cargo run --release -- delete` | Securely prompts for the PIN, shows project-owned credentials, and deletes them only after typing `YES`. |
-| `cargo run --release -- --help` / `-h` / `help` | Print command and option usage. |
+| `cargo run --release -- --help` | Print command and option usage. `-h` and `help` are also accepted after the separator. |
+
+The standalone `--` is required by Cargo to separate Cargo options from this
+program's arguments. For example, `cargo run --release -- list` passes `list`
+to this binary; `cargo run --release --list` is not the equivalent command.
 
 ## 🏗️ DevOps Principles & Best Practices
 
