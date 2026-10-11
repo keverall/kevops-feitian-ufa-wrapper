@@ -1,8 +1,8 @@
 # 🔐 KevOps Feitian UFA Wrapper
 
 > 🧰 Derive a deterministic **256-bit AES vault key** from a **Feitian BioPass FIDO2** fingerprint
-> authenticator using the CTAP2 **hmac-secret** extension — no vault secret is ever stored on disk.
-> This provides primary passwordless UFA secure primary access to encrypted stores and accounts without password entry for CachyOS, Arch Linux and other Linux distro's unlike password managers that insist on password and UFA key biopass thing prints both be supplied, only providing passwordless UFA only for windows hello on MS Windows.
+> authenticator using the CTAP2 **hmac-secret** extension — no vault secret is ever stored on disk.  
+>  🧰 This provides primary passwordless UFA secure primary access to encrypted stores and accounts without password entry for CachyOS, Arch Linux and other Linux distro's unlike password managers that insist on password and UFA key biopass thing prints both be supplied, only providing passwordless UFA only for windows hello on MS Windows.
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 [![Edition](https://img.shields.io/badge/edition-2024-blue.svg)](https://doc.rust-lang.org/edition-guide/)
