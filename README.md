@@ -1,8 +1,18 @@
 # 🔐 KevOps Feitian UFA Wrapper
 
-> 🧰 Derive a deterministic **256-bit AES vault key** from a **Feitian BioPass FIDO2** fingerprint
-> authenticator using the CTAP2 **hmac-secret** extension — no vault secret is ever stored on disk.  
->  🧰 This provides primary passwordless UFA secure primary access to encrypted stores and accounts without password entry for CachyOS, Arch Linux and other Linux distro's unlike password managers that insist on password and UFA key biopass thing prints both be supplied, only providing passwordless UFA only for windows hello on MS Windows.
+> 🧰 Derive a deterministic **256-bit AES-256 key** from a **Feitian BioPass FIDO2** authenticator
+> using the CTAP2 **hmac-secret** extension — no vault secret is ever stored on disk.
+>
+> 🔐 **Authorisation is PIN-based, not fingerprint-based.** Measured on an attached BioPass
+> (`096e:085d`): a fingerprint-only request is rejected with `CTAP2_ERR_PIN_REQUIRED` (`0x36`), and
+> the `pinUvAuth` path sets `uv = None`, so **the fingerprint is not re-checked**. Touch (user
+> presence) is still required.
+>
+> 🧰 Purpose: passwordless primary access to encrypted stores on **CachyOS, Arch Linux and other
+> Linux distros**, without entering a vault password. Maintainer-tested: **Bitwarden** and
+> **NordPass** do not provide FIDO2-only vault unlock on Linux — they expose FIDO2 as a login/2FA
+> factor rather than as vault key material, and reserve passwordless unlock for platform
+> authenticators such as Windows Hello on MS Windows.
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 [![Edition](https://img.shields.io/badge/edition-2024-blue.svg)](https://doc.rust-lang.org/edition-guide/)
@@ -12,6 +22,7 @@
 - [🔐 KevOps Feitian UFA Wrapper](#-kevops-feitian-ufa-wrapper)
   - [Project Structure Tree](#project-structure-tree)
   - [🧭 Overview](#-overview)
+    - [🧪 Measured on hardware](#-measured-on-hardware)
   - [🧩 Architecture](#-architecture)
     - [📈 Key-derivation data flow](#-key-derivation-data-flow)
   - [✅ Prerequisites](#-prerequisites)
@@ -50,7 +61,7 @@ suitable for AES-256.
 │  (Rust binary)   │ ◄─────────────────── │  (secure element)     │
 └──────────────────┘   hmac-secret output └───────────────────────┘
         │                                            │
-        │  salt (32B, SHA-256 of label)              │  👆 fingerprint = user verification
+        │  salt (32B, SHA-256 of label)              │  👆 touch + PIN (pinUvAuth), uv = None
         ▼                                            ▼
    SHA-256(output) ──────────►  32-byte AES-256 vault key
 ```
@@ -60,8 +71,30 @@ suitable for AES-256.
 | 🚪 Relying Party ID | `bitwarden-alternative.kevops` |
 | 🧂 Salt label | `kevops-vault-encryption-salt-xyz` |
 | 🔌 Device | Feitian BioPass `vid 0x096e / pid 0x085d` (fallback All-in-Pass `0x0866`) |
-| 🛡️ Verification | On-device UV (`uv = Some(true)`) — the fingerprint |
+| 🛡️ Authorisation | `pinUvAuth` via `--pin` (sets `uv = None`); touch/presence still required. Fingerprint-only UV is rejected with `0x36` on this device |
 | 📏 Key size | 32 bytes (AES-256), printed as lowercase hex |
+
+### 🧪 Measured on hardware
+
+Verified against the attached BioPass (`lsusb` → `ID 096e:085d Feitian Technologies, Inc.
+BioPassFIDO2`):
+
+```console
+$ cargo run --release            # no --pin: fingerprint-only request
+⚡ Please tap the Feitian BioPass fingerprint sensor...
+- Touch the sensor on the authenticator
+Error: response_status err = 0x36 CTAP2_ERR_PIN_REQUIRED  PIN is required for the selected operation.
+exit=1
+```
+
+| ✅ Claim | Verdict |
+|---|---|
+| CTAP2 hmac-secret extension | ✅ exercised; salt is the 32-byte SHA-256 of `SALT_LABEL` |
+| 256-bit key, 64 hex chars on stdout | ✅ `VAULT_KEY_SIZE = 32`, `HEX_KEY_LENGTH = 64` |
+| Nothing written to disk | ✅ stdout-only; every human message goes to stderr |
+| Fingerprint-only (UV) derivation | ❌ rejected with `0x36 CTAP2_ERR_PIN_REQUIRED` |
+| PIN authorisation re-checks the fingerprint | ❌ `uv = None`; the tool prints "fingerprint was NOT re-checked" |
+| Deterministic | ⚠️ true per credential — see the multi-credential caveat in Limitations |
 
 ---
 
@@ -129,11 +162,11 @@ user: cargo run --release [--pin <pin>]
  eprintln("⚡ tap the sensor ...")            ──► stderr
         │
         ▼ derive_vault_key(device, SALT_LABEL, pin)
-        │   device.hmac_secret(salt, pin)      uv=true (fingerprint),
-        │                                       or pinUvAuth when --pin is given
-        ▼
- crypto::derive_vault_key -> [u8; 32]         SHA-256(hmac_secret) -> AES-256 key
-        │ eprintln("🔓 Fingerprint verified ...") ──► stderr
+         │   device.hmac_secret(salt, pin)      --pin:   pinUvAuth, uv = None
+         │                                      no --pin: 0x36 CTAP2_ERR_PIN_REQUIRED
+         ▼
+  crypto::derive_vault_key -> [u8; 32]         SHA-256(hmac_secret) -> AES-256 key
+         │ eprintln("🔐 PIN verified ... fingerprint was NOT re-checked") ──► stderr
         ▼
  print!("{:x}", key)                                ──► stdout: 64 hex chars ONLY
 ```
@@ -150,7 +183,7 @@ clean, trimmable token.
 |---|---|
 | 🦀 Rust **1.85+** | The crate uses `edition = "2024"` |
 | 🔧 Build deps | `hidapi` needs `libudev` + `pkg-config` |
-| 🔌 Hardware | Feitian BioPass (USB) with **at least one fingerprint enrolled** |
+| 🔌 Hardware | Feitian BioPass (USB) with a **device PIN set** and a vault credential enrolled (`enroll`) |
 | 🔐 udev access | Non-root users need a hidraw rule (see below) |
 
 ```bash
@@ -165,13 +198,17 @@ Without this the process fails with `Failed to open device.`:
 ```bash
 sudo tee /etc/udev/rules.d/70-feitian-biopass.rules > /dev/null <<'EOF'
 # Feitian BioPass / All-in-Pass FIDO2
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="096e", ATTRS{idProduct}=="085d", MODE="0660", GROUP="plugdev", TAG+="uaccess"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="096e", ATTRS{idProduct}=="0866", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+# `uaccess` hands the node to the logged-in seat via systemd-logind: no group
+# required, and it works on Arch/CachyOS where `plugdev` does not exist.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="096e", ATTRS{idProduct}=="085d", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="096e", ATTRS{idProduct}=="0866", TAG+="uaccess"
 EOF
 
 sudo udevadm control --reload-rules && sudo udevadm trigger
-sudo usermod -aG plugdev "$USER"   # re-login for group change to apply
 ```
+
+> 🐧 On Debian/Ubuntu you may additionally pin `MODE="0660", GROUP="plugdev"`, but `TAG+="uaccess"`
+> alone is the portable form and needs no re-login to take effect.
 
 ---
 
@@ -184,9 +221,9 @@ cd kevops-feitian-ufa-wrapper
 cargo check            # 🧪 fast feedback
 cargo build --release  # 📦 optimized artifact
 
-cargo run --release                   # 👆 prompts for the fingerprint
-cargo run --release -- enroll          # 🪪 prompts securely for the device PIN
-cargo run --release -- enroll --pin 123456 # 🪪 non-interactive compatibility form
+cargo run --release -- enroll               # 🪪 prompts securely for the device PIN
+cargo run --release -- derive --pin 123456  # 🔐 derive the key: BioPass requires pinUvAuth
+cargo run --release                         # ❌ 0x36 CTAP2_ERR_PIN_REQUIRED on the BioPass
 
 make ci        # 🧰 full offline gate: fmt + toml-lint + clippy + test + doc
 ```
@@ -194,11 +231,11 @@ make ci        # 🧰 full offline gate: fmt + toml-lint + clippy + test + doc
 Expected output — the 64-char key on **stdout**, every human message on **stderr**:
 
 ```console
-$ cargo run --release 2>/dev/null
+$ cargo run --release -- derive --pin 123456 2>/dev/null
 4f1c...c07d                      # ← stdout only: 64 hex chars, safe to pipe
-$ cargo run --release
-⚡ Please tap the Feitian BioPass fingerprint sensor...   # stderr
-🔓 Fingerprint verified! 256-bit Vault key derived.       # stderr
+$ cargo run --release -- derive --pin 123456
+⚡ Please tap the Feitian BioPass fingerprint sensor...                       # stderr
+🔐 PIN verified! 256-bit Vault key derived (fingerprint was NOT re-checked).  # stderr
 ```
 
 > ⚠️ **Keep `Cargo.lock` committed** — this is a binary crate, so the lockfile is what makes builds
@@ -213,9 +250,9 @@ $ cargo run --release
 
 | Command | Description |
 |---|---|
-| `cargo run --release` | Derive the deterministic 256-bit vault key; prompts for fingerprint verification and writes exactly 64 hex characters to stdout. |
-| `cargo run --release -- derive` | Explicit derive form using fingerprint verification. |
-| `cargo run --release -- derive --pin 123456` | Explicit derive form using PIN authorization; replace the example PIN with the device PIN. |
+| `cargo run --release` | Default derive with no PIN — **on the BioPass this fails** with `0x36 CTAP2_ERR_PIN_REQUIRED`, because hmac-secret requires `pinUvAuth` on this device. |
+| `cargo run --release -- derive` | Explicit derive form; identical to the default, so it also needs `--pin` on the BioPass. |
+| `cargo run --release -- derive --pin 123456` | **The working derive form**: PIN authorisation, touch still required, `uv = None` so the fingerprint is not re-checked. Replace the example PIN with the device PIN. |
 | `cargo run --release -- enroll` | Securely prompts for the device PIN, then enrolls a new credential and interactively chooses whether to add or replace project-owned credentials. |
 | `cargo run --release -- enroll --pin 123456` | Non-interactive enrollment form; replace the example PIN and note that it remains visible to shell history/process listings. |
 | `cargo run --release -- list` | Securely prompts for the PIN and lists resident credentials for the project RP without modifying the authenticator. |
@@ -327,8 +364,9 @@ Only a short list is shown — run `make test` for the full set.
 | 🛡️ Control | Detail |
 |---|---|
 | 🔏 Key custody | `CredRandom` never leaves the secure element; only its HMAC output is returned |
-| 👆 User verification | `uv = Some(true)` forces the fingerprint — the key cannot be derived from a stale token |
-| 🔐 PIN (`uv = None`) | If the authenticator answers `CTAP2_ERR_PIN_REQUIRED` for the hmac-secret extension, pass `derive --pin <pin>`. This authenticates with `pinUvAuth`, which sets `uv = None`, **bypassing the fingerprint** — a deliberate trade-off, so prefer the hardware credential's built-in UV where the device allows it |
+| 👆 User presence | Touch is always required (`up = true`), independently of how the request is authorised |
+| 🔐 PIN authorisation (`uv = None`) | **The working path on the BioPass.** hmac-secret requires `pinUvAuth` here: without `--pin` the device answers `CTAP2_ERR_PIN_REQUIRED` (`0x36`). Supplying it sets `uv = None`, so the **fingerprint is not re-checked** — the tool states this explicitly instead of claiming a fingerprint match |
+| 🚫 Fingerprint UV | Not reachable today: `ctap-hid-fido2` 3.6.0 exports `create_payload_get_pin_uv_auth_token_using_uv_with_permissions`, but keeps the `ctaphid` transport private, so no UV-token can be obtained or sent |
 | 🧂 Domain separation | A distinct 32-byte salt per vault database; changing the salt yields a different key |
 | 🚫 No persistence | Nothing is written to disk; the key goes to stdout for the caller to consume |
 | 🔑 No fallback secrets | There is no password or recovery file that bypasses the hardware |
@@ -359,22 +397,26 @@ cfg.enable_log = true;                 // 🕵️ verbose CTAP/HID hex tracing (
 
 | 🚨 Symptom | ✅ Fix |
 |---|---|
-| `Failed to open device.` | 🔌 Check `lsusb` for `096e:085d`; install the udev rule; re-login for `plugdev`; confirm the device is not claimed by another process (`pcscd`, browser WebAuthn) |
+| `Failed to open device.` | 🔌 Check `lsusb` for `096e:085d`; install the udev rule and re-plug; confirm the device is not claimed by another process (`pcscd`, browser WebAuthn) |
 | `unresolved import fidokeyhid` / `no method get_hmac_secret` | 📦 Those APIs do not exist in `ctap-hid-fido2` 3.6.0 — use `GetAssertionArgsBuilder` + `AssertionExtension::HmacSecret` |
 | Salt rejected / panic on unwrap | 🧂 The salt must be exactly **32 bytes**; use `create_hmac_secret_from_string` |
 | `no assertion returned` | 🪪 No credential registered for the RP ID — enroll with `CredentialExtension::HmacSecret(Some(true))` first |
 | No hmac-secret output, finger accepted | 🔑 Many authenticators require a `pinUvAuthToken`; supply a PIN via `derive --pin <pin>` (note: this sets `uv = None`) |
 | `response_status err = 0x36 CTAP2_ERR_PIN_REQUIRED` | 🔐 This BioPass requires `pinUvAuth` for the hmac-secret extension: re-run with `--pin <pin>` (this is what `src/device.rs::hmac_secret` forwards) |
 | Build fails on the `missing_docs` lint | 📝 Public API must be documented; add a `///` doc comment to the item (the README's "docs as code" gate) |
-| Permission denied opening hidraw | 🦶 Re-apply the udev rule and verify `groups` includes `plugdev` |
-| Fingerprint never triggers | 👆 Ensure a fingerprint is enrolled and the device is not in U2F-only mode |
+| Permission denied opening hidraw | 🦶 Re-apply the `uaccess` rule, re-plug, and confirm the session is active (`loginctl show-session`). Do not rely on `plugdev` — it does not exist on Arch/CachyOS |
+| Sensor touch never registers | 👆 Presence is still required on the working path: touch the BioPass sensor when prompted, and confirm no other process holds the device |
 
 ---
 
 ## 🗺️ Known Limitations & Roadmap
 
-- 🔐 **PIN trade-off on `derive`** — where the device demands `pinUvAuth`, supplying `--pin`
-  bypasses the fingerprint (`uv = None`). Prefer a credential that authenticates with UV.
+- 🔐 **PIN, not fingerprint** — measured on the BioPass: hmac-secret needs `pinUvAuth`, so `--pin` is
+  mandatory and the fingerprint is not re-checked (`uv = None`). Fingerprint-only UV would need a
+  UV-token path that `ctap-hid-fido2` 3.6.0 does not expose (see Security Model).
+- ⚠️ **Determinism is per credential** — `hmac_secret()` asserts without a pinned credential id and
+  takes the first assertion, so two vault credentials under the same RP ID can produce two different
+  keys. Keep exactly one enrolled credential, or pin the credential id.
 - 🧪 **Hardware path not CI-tested** — the functional suite runs against `FakeDevice`; a real
   `enroll`/`derive` round trip still needs a self-hosted runner or a manual smoke test.
 - 🧩 **Single device model** — only `096e:085d` / `096e:0866` are probed; consider `HidParam::get()`
