@@ -183,7 +183,8 @@ cargo check            # 🧪 fast feedback
 cargo build --release  # 📦 optimized artifact
 
 cargo run --release                          # 👆 prompts for the fingerprint
-cargo run --release -- enroll --pin 123456   # 🪪 one-time enrol (needs the device PIN)
+cargo run --release -- enroll                 # 🪪 prompts securely for the device PIN
+cargo run --release -- enroll --pin 123456   # 🪪 non-interactive compatibility form
 
 make ci        # 🧰 full offline gate: fmt + toml-lint + clippy + test + doc
 ```
@@ -205,6 +206,18 @@ $ cargo run --release
 > suite asserts stdout stays empty unless the derived key is written.
 
 ---
+
+### Commands
+
+| Command | Description |
+|---|---|
+| `cargo run --release` | Derive the deterministic 256-bit vault key; prompts for fingerprint verification and writes exactly 64 hex characters to stdout. |
+| `cargo run --release -- derive [--pin <pin>]` | Explicit derive form; optionally uses PIN authorization when the authenticator requires it. |
+| `cargo run --release -- enroll` | Securely prompts for the device PIN, then enrolls a new credential and interactively chooses whether to add or replace project-owned credentials. |
+| `cargo run --release -- enroll --pin <pin>` | Non-interactive enrollment form for automation; the PIN remains visible to shell history/process listings. |
+| `cargo run --release -- list` | Securely prompts for the PIN and lists resident credentials for the project RP without modifying the authenticator. |
+| `cargo run --release -- delete` | Securely prompts for the PIN, shows project-owned credentials, and deletes them only after typing `YES`. |
+| `cargo run --release -- --help` / `-h` / `help` | Print command and option usage. |
 
 ## 🏗️ DevOps Principles & Best Practices
 

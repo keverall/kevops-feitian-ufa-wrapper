@@ -62,6 +62,38 @@ pub fn enroll_vault_credential(
     Ok(name)
 }
 
+/// Delete only credentials owned by this tool after an explicit confirmation.
+///
+/// The confirmation callback receives the filtered credentials before any
+/// deletion. Returning `false` performs no mutation and returns an empty list.
+/// Deletion is best-effort and stops at the first device error.
+///
+/// # Errors
+/// [`VaultError::Device`] when listing or deleting credentials fails.
+pub fn delete_vault_credentials<F>(
+    device: &dyn VaultDevice,
+    pin: &str,
+    confirm: F,
+) -> Result<Vec<String>, VaultError>
+where
+    F: FnOnce(&[StoredCredential]) -> bool,
+{
+    let existing = device.list_credentials(pin).map_err(VaultError::device)?;
+    let owned: Vec<StoredCredential> = replaceable(existing.iter()).cloned().collect();
+    if !confirm(&owned) {
+        return Ok(Vec::new());
+    }
+
+    let mut deleted = Vec::with_capacity(owned.len());
+    for credential in owned {
+        device
+            .delete_credential(pin, &credential.credential_id)
+            .map_err(VaultError::device)?;
+        deleted.push(credential.name);
+    }
+    Ok(deleted)
+}
+
 fn replace_decision(policy: &ReplacePolicy, existing: &[StoredCredential]) -> bool {
     if existing.is_empty() {
         return false;

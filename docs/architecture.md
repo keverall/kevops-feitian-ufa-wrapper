@@ -77,7 +77,7 @@ printed only on success.)
 
 ## 3. Enrolment flow (R/A, replace, rename, delete)
 
-`cargo run --release -- enroll --pin <pin>` → `Command::Enroll { pin }` →
+`cargo run --release -- enroll [--pin <pin>]` → secure PIN prompt when omitted → `Command::Enroll { pin }` →
 `enroll_credential` → `enroll::enroll_vault_credential(device, pin, policy)`.
 
 ```text

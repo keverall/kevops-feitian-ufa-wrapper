@@ -3,6 +3,7 @@
 
 use kevops_feitian_ufa_wrapper::cli::{self, Command};
 use kevops_feitian_ufa_wrapper::error::VaultError;
+use kevops_feitian_ufa_wrapper::secret::SecretString;
 
 fn parse(values: &[&str]) -> Result<Command, VaultError> {
     let args: Vec<String> = values.iter().map(|value| value.to_string()).collect();
@@ -24,13 +25,13 @@ fn the_pin_is_carried_into_enrolment() {
     assert_eq!(
         parse(&["enroll", "--pin", "424242"]).unwrap(),
         Command::Enroll {
-            pin: Some("424242".to_string())
+            pin: Some(SecretString::new("424242".to_string()))
         }
     );
 }
 
 #[test]
-fn enrolment_without_a_pin_is_reported_as_a_usage_error() {
+fn enrolment_without_a_pin_is_left_for_secure_prompting() {
     assert_eq!(parse(&["enroll"]).unwrap(), Command::Enroll { pin: None });
     assert_eq!(VaultError::MissingPin.exit_code(), 2);
     assert!(VaultError::MissingPin.to_string().contains("--pin"));

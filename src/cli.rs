@@ -1,6 +1,7 @@
 //! Argument parsing. Pure — no I/O, so it is covered by unit tests.
 
 use crate::error::VaultError;
+use crate::secret::SecretString;
 
 /// A parsed vault command. No subcommand means [`Command::Derive`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -9,12 +10,16 @@ pub enum Command {
     Derive {
         /// Device PIN, when the authenticator demands `pinUvAuth`.
         /// Authenticators that accept biometric UV work without it.
-        pin: Option<String>,
+        pin: Option<SecretString>,
     },
+    /// List resident vault credentials without modifying the authenticator.
+    List,
+    /// Delete project-owned resident credentials after explicit confirmation.
+    Delete,
     /// Register (and optionally replace) the vault credential.
     Enroll {
-        /// Device PIN. Required for enrolment; `None` is a usage error.
-        pin: Option<String>,
+        /// Device PIN. When omitted, the CLI requests it through a hidden prompt.
+        pin: Option<SecretString>,
     },
     /// Print usage.
     Help,
@@ -29,10 +34,12 @@ usage: kevops-feitian-ufa-wrapper [command] [options]
 
 commands:
   (none)        derive the vault key and print 64 hex chars to stdout
-  enroll        register the vault credential (requires --pin)
+  enroll        register the vault credential (secure PIN prompt)
+  list          list resident vault credentials (read-only)
+  delete        delete project-owned credentials (confirmation required)
 
 options:
-  --pin <pin>   device PIN, required by `enroll`
+  --pin <pin>   device PIN; omit to enter it securely at the prompt
   -h, --help    show this help
 ";
 
@@ -51,6 +58,18 @@ pub fn parse_args(args: &[String]) -> Result<Command, VaultError> {
         "enroll" => Ok(Command::Enroll {
             pin: parse_pin_option(args.iter().skip(1))?,
         }),
+        "list" => {
+            if args.len() > 1 {
+                return Err(VaultError::UnknownCommand(args[1].clone()));
+            }
+            Ok(Command::List)
+        }
+        "delete" => {
+            if args.len() > 1 {
+                return Err(VaultError::UnknownCommand(args[1].clone()));
+            }
+            Ok(Command::Delete)
+        }
         // `derive` is the default command, so the subcommand word itself is optional.
         "derive" | "--pin" => {
             let skip = usize::from(first == "derive");
@@ -65,15 +84,15 @@ pub fn parse_args(args: &[String]) -> Result<Command, VaultError> {
 /// The single option this CLI accepts, shared by every command (DRY).
 fn parse_pin_option<'a>(
     mut options: impl Iterator<Item = &'a String>,
-) -> Result<Option<String>, VaultError> {
+) -> Result<Option<SecretString>, VaultError> {
     let mut pin = None;
 
     while let Some(option) = options.next() {
         if let Some(value) = option.strip_prefix(&format!("{PIN_OPTION}=")) {
-            pin = Some(value.to_string());
+            pin = Some(SecretString::new(value.to_string()));
         } else if option == PIN_OPTION {
             match options.next() {
-                Some(value) => pin = Some(value.clone()),
+                Some(value) => pin = Some(SecretString::new(value.to_string())),
                 None => return Err(VaultError::MissingPin),
             }
         } else {
@@ -88,6 +107,7 @@ fn parse_pin_option<'a>(
 mod tests {
     use super::*;
     use crate::error::VaultError;
+    use crate::secret::SecretString;
 
     fn parse(values: &[&str]) -> Result<Command, VaultError> {
         let args: Vec<String> = values.iter().map(|value| value.to_string()).collect();
@@ -105,10 +125,19 @@ mod tests {
             assert_eq!(
                 parse(&form).unwrap(),
                 Command::Derive {
-                    pin: Some("424242".to_string())
+                    pin: Some(SecretString::new("424242".to_string()))
                 }
             );
         }
+    }
+
+    #[test]
+    fn list_is_a_read_only_command() {
+        assert_eq!(parse(&["list"]).unwrap(), Command::List);
+        assert_eq!(
+            parse(&["list", "--pin"]).unwrap_err(),
+            VaultError::UnknownCommand("--pin".to_string())
+        );
     }
 
     #[test]
@@ -119,8 +148,8 @@ mod tests {
     }
 
     #[test]
-    fn enroll_without_a_pin_is_a_usage_error_only_at_run_time() {
-        // Parsing succeeds so the binary can report the missing PIN once opened.
+    fn enroll_without_a_pin_is_parsed_for_secure_prompting() {
+        // Parsing succeeds so the binary can securely prompt for the PIN.
         assert_eq!(parse(&["enroll"]).unwrap(), Command::Enroll { pin: None });
     }
 
@@ -129,7 +158,7 @@ mod tests {
         assert_eq!(
             parse(&["enroll", "--pin", "123456"]).unwrap(),
             Command::Enroll {
-                pin: Some("123456".to_string())
+                pin: Some(SecretString::new("123456".to_string()))
             }
         );
     }
@@ -139,7 +168,7 @@ mod tests {
         assert_eq!(
             parse(&["enroll", "--pin=123456"]).unwrap(),
             Command::Enroll {
-                pin: Some("123456".to_string())
+                pin: Some(SecretString::new("123456".to_string()))
             }
         );
     }

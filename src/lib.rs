@@ -29,6 +29,7 @@ pub mod device;
 pub mod enroll;
 pub mod error;
 pub mod naming;
+pub mod secret;
 
 pub use device::{FidoKeyHidDevice, open_device};
 pub use error::VaultError;

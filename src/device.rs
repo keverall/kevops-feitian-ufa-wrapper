@@ -191,5 +191,10 @@ pub fn open_device() -> Result<FidoKeyHid, Box<dyn std::error::Error>> {
         },
     ];
 
-    Ok(FidoKeyHid::new(&params, &cfg)?)
+    let mut device = FidoKeyHid::new(&params, &cfg)?;
+    // BioPass firmware may advertise PIN/UV protocol 2 even though the crate
+    // defaults to protocol 1. Negotiate the newer protocol to match clients
+    // such as Bitwarden; retain protocol 1 when protocol 2 is unavailable.
+    let _ = device.set_pin_uv_auth_protocol_two();
+    Ok(device)
 }

@@ -1,6 +1,6 @@
 //! Sequential naming of enrolled vault credentials: `<PREFIX>01`, `<PREFIX>02`, ...
 
-use crate::config::CREDENTIAL_NAME_PREFIX;
+use crate::config::{CREDENTIAL_NAME_PREFIX, USER_NAME_INITIAL};
 use crate::error::VaultError;
 
 /// Width of the zero-padded credential counter.
@@ -16,7 +16,7 @@ pub fn first_credential_name() -> String {
 /// Only credentials this tool created are renamed or deleted; foreign
 /// credentials sharing the RP id must survive a replace.
 pub fn is_vault_name(name: &str) -> bool {
-    name.starts_with(CREDENTIAL_NAME_PREFIX)
+    name == USER_NAME_INITIAL || name.starts_with(CREDENTIAL_NAME_PREFIX)
 }
 
 /// The next sequential name given the names already on the authenticator.
@@ -54,7 +54,7 @@ fn padded(counter: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::CREDENTIAL_NAME_PREFIX;
+    use crate::config::{CREDENTIAL_NAME_PREFIX, USER_NAME_INITIAL};
 
     #[test]
     fn first_name_is_zero_padded_to_two_digits() {
@@ -126,6 +126,7 @@ mod tests {
     #[test]
     fn only_names_with_the_vault_prefix_are_ours() {
         assert!(is_vault_name(&format!("{CREDENTIAL_NAME_PREFIX}01")));
+        assert!(is_vault_name(USER_NAME_INITIAL));
         assert!(!is_vault_name("bitwarden-login"));
         assert!(!is_vault_name(&format!("other-{CREDENTIAL_NAME_PREFIX}01")));
     }

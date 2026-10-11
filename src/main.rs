@@ -15,6 +15,7 @@ use kevops_feitian_ufa_wrapper::device::{
 };
 use kevops_feitian_ufa_wrapper::enroll::{self, ReplacePolicy};
 use kevops_feitian_ufa_wrapper::error::VaultError;
+use kevops_feitian_ufa_wrapper::secret::SecretString;
 
 /// Exit code for runtime and device failures.
 const EXIT_RUNTIME: u8 = 1;
@@ -37,9 +38,21 @@ fn run(args: &[String]) -> Result<(), Failure> {
             print!("{}", cli::USAGE);
             Ok(())
         }
-        Command::Derive { pin } => with_device(|device| print_vault_key(device, pin.as_deref())),
-        Command::Enroll { pin: None } => Err(Failure::usage(VaultError::MissingPin)),
-        Command::Enroll { pin: Some(pin) } => with_device(|device| enroll_credential(device, pin)),
+        Command::Derive { pin } => with_device(|device| {
+            print_vault_key(device, pin.as_ref().map(SecretString::expose_secret))
+        }),
+        Command::List => {
+            let pin = prompt_for_pin()?;
+            with_device(|device| list_credentials(device, pin))
+        }
+        Command::Delete => {
+            let pin = prompt_for_pin()?;
+            with_device(|device| delete_credentials(device, pin))
+        }
+        Command::Enroll { pin } => {
+            let pin = pin.map_or_else(prompt_for_pin, Ok)?;
+            with_device(|device| enroll_credential(device, pin))
+        }
     }
 }
 
@@ -62,11 +75,68 @@ fn print_vault_key(device: &dyn VaultDevice, pin: Option<&str>) -> Result<(), Fa
     Ok(())
 }
 
-fn enroll_credential(device: &dyn VaultDevice, pin: String) -> Result<(), Failure> {
-    let name = enroll::enroll_vault_credential(device, &pin, replace_policy())
+fn list_credentials(device: &dyn VaultDevice, pin: SecretString) -> Result<(), Failure> {
+    let credentials = device
+        .list_credentials(pin.expose_secret())
+        .map_err(Failure::runtime)?;
+
+    if credentials.is_empty() {
+        println!("No resident credentials found for RP '{RP_ID}'.");
+        return Ok(());
+    }
+
+    println!(
+        "{} resident credential(s) for RP '{RP_ID}':",
+        credentials.len()
+    );
+    for (index, credential) in credentials.iter().enumerate() {
+        println!(
+            "{}. name={:?} display_name={:?} id={}",
+            index + 1,
+            credential.name,
+            credential.display_name,
+            crypto::to_hex(&credential.credential_id)
+        );
+    }
+    Ok(())
+}
+
+fn delete_credentials(device: &dyn VaultDevice, pin: SecretString) -> Result<(), Failure> {
+    let deleted = enroll::delete_vault_credentials(device, pin.expose_secret(), |credentials| {
+        if credentials.is_empty() {
+            eprintln!("No project-owned credentials found; nothing will be deleted.");
+            return false;
+        }
+        eprintln!("The following project-owned credential(s) will be deleted:");
+        for credential in credentials {
+            eprintln!("- {:?} ({:?})", credential.name, credential.display_name);
+        }
+        eprint!("Type YES to permanently delete them: ");
+        let _ = std::io::stderr().flush();
+        let mut answer = String::new();
+        std::io::stdin().read_line(&mut answer).is_ok() && answer.trim() == "YES"
+    })
+    .map_err(Failure::runtime)?;
+
+    if deleted.is_empty() {
+        eprintln!("No credentials deleted.");
+    } else {
+        eprintln!("Deleted {} project-owned credential(s).", deleted.len());
+    }
+    Ok(())
+}
+
+fn enroll_credential(device: &dyn VaultDevice, pin: SecretString) -> Result<(), Failure> {
+    let name = enroll::enroll_vault_credential(device, pin.expose_secret(), replace_policy())
         .map_err(Failure::runtime)?;
     eprintln!("✅ Enrolled vault credential '{name}' for RP '{RP_ID}'.");
     Ok(())
+}
+
+fn prompt_for_pin() -> Result<SecretString, Failure> {
+    rpassword::prompt_password("Device PIN: ")
+        .map(SecretString::new)
+        .map_err(Failure::runtime)
 }
 
 /// `R` replaces the existing credentials; anything else (including Enter) adds.
@@ -117,17 +187,5 @@ impl std::fmt::Display for Failure {
         match self {
             Self::Usage(error) | Self::Runtime(error) => write!(f, "{error}"),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn missing_enrollment_pin_is_rejected_before_opening_hardware() {
-        let args = vec!["enroll".to_string()];
-        let error = run(&args).expect_err("missing PIN must be a usage error");
-        assert!(matches!(error, Failure::Usage(VaultError::MissingPin)));
     }
 }
