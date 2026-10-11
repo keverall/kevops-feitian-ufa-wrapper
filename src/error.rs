@@ -36,7 +36,10 @@ impl fmt::Display for VaultError {
                 write!(f, "no vault-owned credential found to replace")
             }
             Self::CredentialCounterExhausted => {
-                write!(f, "credential name counter exhausted; rename the oldest credential")
+                write!(
+                    f,
+                    "credential name counter exhausted; rename the oldest credential"
+                )
             }
             Self::Device(message) => write!(f, "{message}"),
         }

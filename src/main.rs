@@ -9,7 +9,7 @@ use std::process::ExitCode;
 use kevops_feitian_ufa_wrapper::cli::{self, Command};
 use kevops_feitian_ufa_wrapper::config::{RP_ID, SALT_LABEL};
 use kevops_feitian_ufa_wrapper::crypto;
-use kevops_feitian_ufa_wrapper::derive::{self, key_derived_message, TOUCH_PROMPT};
+use kevops_feitian_ufa_wrapper::derive::{self, TOUCH_PROMPT, key_derived_message};
 use kevops_feitian_ufa_wrapper::device::{
     FidoKeyHidDevice, StoredCredential, VaultDevice, open_device,
 };
@@ -38,7 +38,8 @@ fn run(args: &[String]) -> Result<(), Failure> {
             Ok(())
         }
         Command::Derive { pin } => with_device(|device| print_vault_key(device, pin.as_deref())),
-        Command::Enroll { pin } => with_device(|device| enroll_credential(device, pin)),
+        Command::Enroll { pin: None } => Err(Failure::usage(VaultError::MissingPin)),
+        Command::Enroll { pin: Some(pin) } => with_device(|device| enroll_credential(device, pin)),
     }
 }
 
@@ -61,10 +62,7 @@ fn print_vault_key(device: &dyn VaultDevice, pin: Option<&str>) -> Result<(), Fa
     Ok(())
 }
 
-fn enroll_credential(device: &dyn VaultDevice, pin: Option<String>) -> Result<(), Failure> {
-    let Some(pin) = pin else {
-        return Err(Failure::usage(VaultError::MissingPin));
-    };
+fn enroll_credential(device: &dyn VaultDevice, pin: String) -> Result<(), Failure> {
     let name = enroll::enroll_vault_credential(device, &pin, replace_policy())
         .map_err(Failure::runtime)?;
     eprintln!("✅ Enrolled vault credential '{name}' for RP '{RP_ID}'.");
@@ -119,5 +117,17 @@ impl std::fmt::Display for Failure {
         match self {
             Self::Usage(error) | Self::Runtime(error) => write!(f, "{error}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_enrollment_pin_is_rejected_before_opening_hardware() {
+        let args = vec!["enroll".to_string()];
+        let error = run(&args).expect_err("missing PIN must be a usage error");
+        assert!(matches!(error, Failure::Usage(VaultError::MissingPin)));
     }
 }

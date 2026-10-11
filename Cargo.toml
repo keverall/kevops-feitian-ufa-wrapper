@@ -12,7 +12,9 @@ categories = [ "cryptography", "hardware-support" ]
 
 [dependencies]
 ctap-hid-fido2 = "3.6.0"
+rpassword = "7"
 sha2 = "0.11.0"
+zeroize = "1"
 
 # Lint gate. `clippy::all` is denied so `cargo clippy --all-targets -- -D warnings`
 # fails CI on any correctness/style/complexity/perf lint. `priority = -1` lets a
