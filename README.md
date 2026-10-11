@@ -16,6 +16,7 @@
   - [✅ Prerequisites](#-prerequisites)
     - [🦶 udev rule (required on Linux)](#-udev-rule-required-on-linux)
   - [🚀 Quickstart](#-quickstart)
+    - [Commands](#commands)
   - [🏗️ DevOps Principles \& Best Practices](#️-devops-principles--best-practices)
     - [🎯 Core principles applied](#-core-principles-applied)
     - [🧪 Quality gates](#-quality-gates)
